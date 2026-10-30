@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="fa"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Starry Night</title>
+<style>*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;min-height:100%;background:#020511;overflow:hidden;overscroll-behavior:none}body{touch-action:pan-y}canvas{display:block;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:#020511;max-width:100vw;max-height:100vh} </style></head>
+<body><canvas id="c"></canvas>
+<script>
+const cv=document.getElementById('c');
+const gl=cv.getContext('webgl',{alpha:false,antialias:false,powerPreference:'high-performance'});
+const status=document.createElement('div');
+status.style.cssText='position:fixed;inset:auto 12px 12px;padding:9px 12px;border-radius:10px;background:#111c;color:#fff;font:13px system-ui,sans-serif;text-align:center;pointer-events:none;z-index:2';
+function showStatus(message){status.textContent=message;document.body.appendChild(status)}
+if(!gl){document.body.style.background='#050817';showStatus('این مرورگر WebGL را فعال نکرده است. با نسخهٔ به‌روز Chrome، Firefox یا Safari امتحان کنید.');throw new Error('WebGL unavailable')}
+function fit(){
+  const ratio=16/9;let w=window.innerWidth,h=window.innerHeight;
+  if(w/h>ratio)w=h*ratio;else h=w/ratio;
+  const dpr=window.devicePixelRatio||1;
+  const quality=Math.min(dpr,1.6);
+  cv.style.width=w+'px';cv.style.height=h+'px';
+  cv.width=Math.max(1,Math.floor(w*quality));cv.height=Math.max(1,Math.floor(h*quality));
+  gl.viewport(0,0,cv.width,cv.height);
+}
+fit();window.addEventListener('resize',fit,{passive:true});
+window.addEventListener('orientationchange',()=>setTimeout(fit,120),{passive:true});
+cv.addEventListener('webglcontextlost',event=>{event.preventDefault();showStatus('گرافیک مرورگر موقتاً متوقف شد. صفحه را دوباره بارگذاری کنید.');});
+
+/* ---------- procedural reference scene (sampled into particles) ---------- */
+const W=500,Hh=400;
+const cl=(v,a=0,b=1)=>Math.min(b,Math.max(a,v)),mv=(a,b,t)=>a.map((v,i)=>v+(b[i]-v)*t);
+const H=(x,y)=>{const n=Math.sin(x*127.1+y*311.7)*43758.5453;return n-Math.floor(n)};
+function vn(x,y,P){const xi=Math.floor(x),yi=Math.floor(y),xf=x-xi,yf=y-yi,sx=xf*xf*(3-2*xf),sy=yf*yf*(3-2*yf),y0=((yi%P)+P)%P,y1=(y0+1)%P;
+ const a=H(xi,y0),b=H(xi+1,y0),c=H(xi,y1),d=H(xi+1,y1);return (a+(b-a)*sx)*(1-sy)+(c+(d-c)*sx)*sy}
+function fbm(x,y,P){let s=0,a=.5;for(let i=0;i<4;i++){s+=a*vn(x,y,P);x*=2;y*=2;P*=2;a/=2}return s/.9375}
+/* Starry Night, procedural interpretation: world x in [-.625,.625], y in [-.5,.5]; u=x/1.25+.5, v=.5-y */
+/* ===== The Starry Night — procedural particle interpretation =====
+   world: x in [-.625,.625], y in [-.5,.5]; painting coords u=x/1.25+.5, v=.5-y
+   scene(x,y) -> [r,g,b,layer,order]  layer: 0 sky/hills, 1 light source (stars, moon, windows), 3 cypress, 4 village/ground */
+const SM=[[0,[8,16,60]],[.2,[16,34,104]],[.38,[26,64,152]],[.52,[38,106,184]],[.64,[58,150,196]],[.76,[116,198,206]],[.88,[200,232,222]],[.95,[242,236,176]],[1,[255,246,206]]];
+const pl=(P,g)=>{g=cl(g);for(let i=1;i<P.length;i++)if(g<=P[i][0]){const a=P[i-1],b=P[i];return mv(a[1],b[1],(g-a[0])/(b[0]-a[0]))}return P[P.length-1][1]};
+const sm=(a,b,x)=>{x=cl((x-a)/(b-a));return x*x*(3-2*x)};
+const VX=[[-.125,.2,.2,10],[.106,.1,.12,-8],[.25,.17,.09,5],[-.29,.26,.1,-4]];   // great swirl + counter-eddies
+const STR=[[.06,.12,.05],[.205,.085,.052],[.31,.17,.05],[.5,.08,.055],[.6,.2,.05],[.735,.19,.075],[.645,.07,.05],[.9,.36,.052],[.8,.47,.05],[.35,.5,.05],[.5,.5,.05]].map(([u,v,r])=>[(u-.5)*1.25,.5-v,r]);
+const hv=u=>.63+.04*Math.sin(u*6.5+1.4)+.02*Math.sin(u*17+.5)-.06*Math.exp(-Math.pow((u-.12)/.2,2));
+
+function skyc(x,y,v){let p=x,q=y,lb=0;           // warp space through every vortex -> spiral flow lines
+ for(const[cx,cy,R,s]of VX){const dx=p-cx,dy=q-cy,e=Math.exp(-(dx*dx+dy*dy)/(R*R)),a=s*e,ca=Math.cos(a),sa=Math.sin(a);p=cx+dx*ca-dy*sa;q=cy+dx*sa+dy*ca;lb+=e*.45}
+ const n=fbm(p*4+3,q*4,1e6),w=q*44+p*8+(n-.5)*7+Math.sin(p*7+1)*1.4,b=.5+.5*Math.sin(w),t=fbm(p*9,q*60,1e6);  // strokes run along the flow
+ return pl(SM,.04+.3*sm(0,.6,v)+.36*Math.pow(b,1.3)+.24*Math.pow(b,7)+.34*cl(lb)+(t-.5)*.34+(n-.5)*.18)}
+
+const HS=[];for(let i=0;i<18;i++)HS.push([.34+i*.036+(H(i,1.1)-.5)*.016,.024+.02*H(i,2.2),.04+.05*H(i,5.5),.855+.03*Math.sin(i*2.1)+.01*(i%2),i,H(i,8.8)]);
+function village(u,v){const dc=Math.abs(u-.615);
+ if(v>.55&&v<.74&&dc<.012*Math.min(1,(v-.55)/.19))return[56,68,124,4,.74];
+ if(v>.78&&v<.8&&dc<.0035)return[255,214,92,1,.92];
+ if(v>=.72&&v<.87&&dc<.015)return[(62+20*H(u*200,v*200))|0,74,130,4,.74];
+ for(const[uc,w,h,vb,i,r2]of HS){const ax=Math.abs(u-uc),rh=w*.5;
+  if(ax<w/2&&v>vb-h&&v<vb){for(const k of[-1,0,1])if(Math.abs(u-uc-k*w*.3)<.0036&&Math.abs(v-vb+h*.5)<.0052&&H(i,k+3)>.28)return[255,H(i,k)>.5?214:170,84,1,.92];
+   const n=H(Math.floor(u*320),Math.floor(v*320)),a=r2<.4?[38,56,112]:r2<.75?[66,84,134]:[112,92,70],m=.8+.4*n;return[a[0]*m|0,a[1]*m|0,a[2]*m|0,4,.76]}
+  if(v<=vb-h&&v>vb-h-rh&&ax<w/2*(1-(vb-h-v)/rh))return[...(r2<.4?[28,38,92]:r2<.75?[156,86,50]:[84,92,64]),4,.8]}
+ return null}
+function cyp(u,v){const s=(v-.03)/.97;if(s<0)return -9;   // flame-shaped cypress: returns -1..1 across its width
+ const xc=.175+.03*Math.sin(s*7.5)*(.3+.7*s)-.02*(1-s)*(1-s),hw=.095*Math.pow(s,.62)*(1-.25*Math.pow(s,6))*(1+.22*Math.sin(s*40+(u<xc?0:2))*Math.min(1,s*3))+.004;
+ return Math.abs(u-xc)<hw?(u-xc)/hw:-9}
+
+function scene(x,y){const u=x/1.25+.5,v=.5-y,cc=cyp(u,v);
+ if(cc>-2){const n=fbm(u*60,v*10,1e6),w=.5+.5*Math.sin(cc*9+Math.sin(v*11+cc*3)*3+n*5);let c=mv([5,9,8],[18,52,38],w*(.5+n));c=mv(c,[36,100,84],cl(w*n*1.6-.55));if(H(Math.floor(u*400),Math.floor(v*300))>.93)c=[98,80,30];return[...c,3,.8+.2*(1-v)]}
+ const vl=v>.54?village(u,v):null;if(vl)return vl;
+ const hh=hv(u);
+ if(v>hh){const d=v-hh,n=fbm(u*8,v*18,1e6);
+  if(v<.78){const s=.5+.5*Math.sin(d*230+n*6);return[...mv(mv([112,142,196],[30,40,108],cl(d*7)),[58,66,150],s*.45).map(a=>a*(.8+.4*n)),0,.6+.08*H(u*99,v*99)]}
+  return[...mv([10,22,50],[26,70,62],cl(fbm(u*30,v*10,1e6)*1.7-.3)),4,.66+.06*H(u*77,v*77)]}
+ let c=mv(skyc(x,y,v),[204,214,140],.3*Math.exp(-Math.pow((v-.585)/.05,2))),f=0;
+ for(const[sx,sy,R]of STR){const dx=x-sx,dy=y-sy,d=Math.hypot(dx,dy);if(d<R){const t=d/R;let k=mv([140,206,236],[255,224,86],.5+.5*Math.cos(t*19+Math.sin(Math.atan2(dy,dx)*8)*.9));if(t<.28)k=mv([255,252,230],k,t/.28);c=mv(c,k,Math.pow(1-t,1.15)*.97);if(t<.62)f=1}}
+ const mx=.444,my=.36,dx=x-mx,dy=y-my,dm=Math.hypot(dx,dy);
+ if(dm<.2){const t=dm/.2;c=mv(c,mv([255,150,30],[250,214,96],.5+.5*Math.cos(t*30+Math.sin(Math.atan2(dy,dx)*6)*.8)),Math.pow(1-t,1.5)*.9);if(dm<.11)f=1}
+ if(dm<.062&&Math.hypot(dx+.034,dy-.012)>.054){c=mv([255,240,160],[255,186,48],dm/.062);f=1}
+ return[...c,f,f?.5+.1*H(x*500,y*500):.45*cl(Math.hypot(x+.125,y-.2)/.9)]}
+
+/* ---------- particles ---------- */
+const smallScreen=Math.min(innerWidth,innerHeight)<700;
+const lowPower=(navigator.hardwareConcurrency||4)<=4;
+const N=smallScreen?(lowPower?65000:90000):(lowPower?125000:175000);
+const A=new Float32Array(N*4),B=new Float32Array(N*4),C=new Float32Array(N*4),G=new Uint32Array(N);
+for(let i=0;i<N;i++){let x,y;for(;;){x=(Math.random()-.5)*1.25;y=Math.random()-.5;if(Math.max(Math.abs(x)/.625,Math.abs(y)/.5)+(Math.random()-.5)*.016<1)break}
+ const c=scene(x,y),ty=c[3],jt=.85+.3*Math.random(),z=(ty==3?-.06:ty==4?-.015:ty==1?(y<-.1?-.02:.04):.03+.04*(.5-y))+(Math.random()-.5)*.02;
+ A.set([x,y,z,ty],i*4);B.set([c[0]*jt/255,c[1]*jt/255,c[2]*jt/255,(ty==1?.0038:.0042)*(.7+.6*Math.random())],i*4);C.set([Math.random(),Math.random(),Math.random(),c[4]],i*4)}
+let na=0,ng=N;for(let i=0;i<N;i++)G[A[i*4+3]==1?--ng:na++]=i;   // light-source particles last, so the bloom pass can draw only them
+const reo=S=>{const R=new Float32Array(N*4);for(let j=0;j<N;j++)R.set(S.subarray(G[j]*4,G[j]*4+4),j*4);return R},TG=reo(A),CS=reo(B),RN=reo(C),G0=ng;
+
+/* ---------- shaders ---------- */
+const VS=`precision highp float;attribute vec4 tg,cs,rn;uniform float t,H,gw;varying vec3 vc;varying float vg,vm;
+vec3 pal(float h){h=fract(h)*5.;return h<1.?vec3(.25,.45,1.):h<2.?vec3(.62,.34,1.):h<3.?vec3(1.,.5,.12):h<4.?vec3(1.,.96,.88):vec3(1.,.8,.28);}
+void main(){
+float r4=fract(sin(dot(rn.xyz,vec3(12.9898,78.233,37.719)))*43758.5453);
+bool G=tg.w>.5&&tg.w<1.5;
+vec3 d=normalize(rn.xyz*2.-1.+.001);
+float tb=clamp((t-1.6)/3.4,0.,1.),e=1.-pow(1.-tb,3.);
+vec3 b=d*(.016+.03*r4+(.1+.9*r4*r4+.22*rn.x)*e);b.z*=.25;b*=1.+.12*sin(t*6.)*(1.-e);
+float a=((rn.y-.5)*2.6+1.1)*e;
+b.xy=mat2(cos(a),sin(a),-sin(a),cos(a))*b.xy;
+b+=.03*e*vec3(sin(t*.8+rn.x*40.),cos(t*.7+rn.y*40.),sin(t*.6+rn.z*40.));
+float dl=3.2+5.2*rn.w+.6*rn.z;
+float pa=clamp((t-dl)/3.3,0.,1.),s=pa*pa*(3.-2.*pa),st=smoothstep(.9,1.,pa);
+vec3 p=mix(b,tg.xyz,s);vec2 dr=tg.xy-b.xy;
+p.xy+=normalize(vec2(-dr.y,dr.x)+.0001)*sin(s*3.1416)*(rn.y-.5)*.55;
+p+=st*.002*vec3(sin(t*2.3+rn.x*60.),cos(t*2.1+rn.y*60.),sin(t*1.7+rn.z*60.));
+if(tg.w<.5){vec2 q=p.xy-vec2(-.125,.2);float an=st*.035*sin(t*.55)*exp(-dot(q,q)*8.);p.xy=vec2(-.125,.2)+mat2(cos(an),sin(an),-sin(an),cos(an))*q;}
+vec3 c=mix(vec3(1.,.72,.2),pal(rn.x*3.7+r4),smoothstep(1.5,2.8,t));
+c=mix(c,cs.rgb,s);c*=1.+.12*st*sin(t*2.+r4*90.)+(1.-s)*.5;
+if(G)c*=1.+.25*st*sin(t*1.6+tg.x*21.+tg.y*17.)+1.8*pow(max(sin(pa*3.1416),0.),4.)*(1.-st);
+float ge=1.-s;vc=c;vm=gw;vg=(.0012+.45*e*e)*ge+(G?.07*s:0.);
+float w=1.+.5*p.z;
+gl_Position=vec4(p.x*1.125,p.y*2.,p.z*.5,w);
+gl_PointSize=cs.w*H/w*(gw>.5?(G?4.5:2.4):1.);
+if(gw>.5&&tg.w>2.5&&s>.4)gl_Position=vec4(2.,2.,2.,1.);}`;
+const FS=`precision mediump float;varying vec3 vc;varying float vg,vm;
+void main(){vec2 q=gl_PointCoord*2.-1.;float r2=dot(q,q);
+if(vm>.5){gl_FragColor=vec4(vc*exp(-r2*4.)*vg*.5,1.);return;}
+if(r2>1.)discard;
+vec3 n=vec3(q.x,-q.y,sqrt(1.-r2));
+float df=max(dot(n,normalize(vec3(-.4,.55,.75))),0.),sp=pow(max(dot(n,normalize(vec3(-.25,.4,.88))),0.),32.),rm=pow(1.-n.z,3.);
+gl_FragColor=vec4(vc*(.3+.95*df+.25*rm)+vec3(1.,.92,.75)*sp*.5,1.);}`;
+const sh=(type,source)=>{
+  const shader=gl.createShader(type);gl.shaderSource(shader,source);gl.compileShader(shader);
+  if(!gl.getShaderParameter(shader,gl.COMPILE_STATUS)){const info=gl.getShaderInfoLog(shader)||'Unknown shader error';gl.deleteShader(shader);throw new Error(info)}
+  return shader;
+};
+let pg;
+try{
+  pg=gl.createProgram();gl.attachShader(pg,sh(gl.VERTEX_SHADER,VS));gl.attachShader(pg,sh(gl.FRAGMENT_SHADER,FS));gl.linkProgram(pg);
+  if(!gl.getProgramParameter(pg,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(pg)||'Shader link failed');
+  gl.useProgram(pg);
+}catch(error){showStatus('مشکل در راه‌اندازی گرافیک: '+error.message);throw error;}
+for(const[n,a]of[['tg',TG],['cs',CS],['rn',RN]]){const l=gl.getAttribLocation(pg,n);gl.bindBuffer(gl.ARRAY_BUFFER,gl.createBuffer());gl.bufferData(gl.ARRAY_BUFFER,a,gl.STATIC_DRAW);gl.enableVertexAttribArray(l);gl.vertexAttribPointer(l,4,gl.FLOAT,false,0,0)}
+const uT=gl.getUniformLocation(pg,'t'),uH=gl.getUniformLocation(pg,'H'),uG=gl.getUniformLocation(pg,'gw');
+let t0=0,raf=0;
+const SPEED=0.5; // کمتر = حرکت آهسته‌تر
+function replay(){t0=0;if(!document.hidden&&!raf)raf=requestAnimationFrame(draw)}
+cv.addEventListener('pointerdown',replay,{passive:true});
+function draw(now){
+  raf=0;if(document.hidden)return;
+  if(!t0)t0=now;const T=(now-t0)/1000*SPEED;
+  gl.uniform1f(uT,T);gl.uniform1f(uH,cv.height);
+  gl.clearColor(0.008,0.012,0.035,1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+  gl.enable(gl.DEPTH_TEST);gl.disable(gl.BLEND);gl.uniform1f(uG,0);gl.drawArrays(gl.POINTS,0,N);
+  gl.disable(gl.DEPTH_TEST);gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE);gl.uniform1f(uG,1);
+  const firstGlow=T<13.5?0:G0;gl.drawArrays(gl.POINTS,firstGlow,N-firstGlow);
+  raf=requestAnimationFrame(draw);
+}
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden){if(raf)cancelAnimationFrame(raf);raf=0;t0=0;}
+  else if(!raf)raf=requestAnimationFrame(draw);
+});
+requestAnimationFrame(draw);
+</script></body></html>
